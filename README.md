@@ -3,7 +3,7 @@ TrafficAnomalyTimeSeries is a Python-based project designed to detect and analyz
 
 
 ### Purpose
-The primary goal of TrafficAnomalyTimeSeries is to provide a robust tool for traffic authorities and urban planners to monitor and analyze traffic conditions. By detecting anomalies in traffic data, such as sudden drops in speed or unexpected congestion, this tool can help identify potential issues like broken traffic lights or accidents, allowing for timely intervention.
+The primary goal of TrafficAnomalyTimeSeries is to provide a robust tool for Arcadis to monitor and analyze traffic conditions. By detecting anomalies in traffic data, such as sudden drops in speed or unexpected congestion, this tool can help identify potential issues like broken traffic lights or accidents, allowing for timely intervention.
 
 ## Data Acquisition
 The data for this project is obtained through the RITIS PDA API. Specifically, we submit a request for traffic data, specifying the desired time range, granularity, and data fields. The data is then fetched, processed, and analyzed to detect anomalies.
