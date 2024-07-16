@@ -1,0 +1,2 @@
+﻿tmc,road,direction,intersection,state,county,zip,start_latitude,start_longitude,end_latitude,end_longitude,miles,road_order,timezone_name,type,country,active_start_date,active_end_date
+112+05857,FM-1093,EASTBOUND,TX-6/ADDICKS HOWELL RD,TX,HARRIS,77082,29.73268,-95.65348,29.73549,-95.6441,0.624925,5.0,America/Chicago,P1.11,USA,2024-04-09 14:00:00-04:00,null
