@@ -26,7 +26,7 @@ def submit_export_job():
     params = {
         "uuid": job_uuid,
         "segments": {"type": "tmc", "ids": ['112+05857']},
-        "dates": [{"start": "2024-06-08", "end": "2024-07-15"}],
+        "dates": [{"start": "2024-07-14", "end": "2024-07-15"}],
         "dow": [0, 1, 2, 3, 4, 5, 6],
         "dsFields": [{"id": "inrix_tmc", "columns": all_columns}],
         "title": "Probe Data Export",
