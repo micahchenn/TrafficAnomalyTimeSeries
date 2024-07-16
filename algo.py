@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import os
 
 # Load the datasets
 print("Loading datasets...")
@@ -58,6 +59,10 @@ for tmc in data_merged['tmc'].unique():
 
 print("Anomaly detection completed.")
 
+# Create directory for saving plots
+output_dir = 'pictures'
+os.makedirs(output_dir, exist_ok=True)
+
 # Plot the speed vs historical average speed and reference speed for each TMC segment
 print("Plotting data for TMC segments...")
 
@@ -65,22 +70,33 @@ for tmc in data_merged['tmc'].unique():
     print(f"Plotting data for TMC segment {tmc}...")
     segment_data = data_merged[data_merged['tmc'] == tmc]
 
-    plt.figure(figsize=(14, 7))
-    plt.plot(segment_data['measurement_tstamp'], segment_data['speed'], label='Current Speed', color='blue')
-    plt.plot(segment_data['measurement_tstamp'], segment_data['historical_average_speed'], label='Historical Average Speed', color='green')
-    plt.plot(segment_data['measurement_tstamp'], segment_data['reference_speed'], label='Reference Speed', color='red')
+    road = segment_data['road'].iloc[0]
+    direction = segment_data['direction'].iloc[0]
+    intersection = segment_data['intersection'].iloc[0]
+    state = segment_data['state'].iloc[0]
+
+    fig, ax = plt.subplots(figsize=(14, 7))
+    ax.plot(segment_data['measurement_tstamp'], segment_data['speed'], label='Current Speed', color='blue')
+    ax.plot(segment_data['measurement_tstamp'], segment_data['historical_average_speed'], label='Historical Average Speed', color='green')
+    ax.plot(segment_data['measurement_tstamp'], segment_data['reference_speed'], label='Reference Speed', color='red')
 
     # Plot anomalies
     anomalies = all_anomalies[all_anomalies['tmc'] == tmc]
-    plt.scatter(anomalies['measurement_tstamp'], anomalies['speed'], color='orange', label='Anomalies', zorder=5)
+    ax.scatter(anomalies['measurement_tstamp'], anomalies['speed'], color='orange', label='Anomalies', zorder=5)
 
-    plt.xlabel('Time')
-    plt.ylabel('Speed (mph)')
-    plt.title(f'Speed vs Historical Average Speed and Reference Speed for TMC {tmc}')
-    plt.legend()
-    plt.xticks(rotation=45)
-    plt.grid(True)
+    ax.set_xlabel('Time')
+    ax.set_ylabel('Speed (mph)')
+    ax.set_title(f'{road} {direction} at {intersection}, {state}')
+    ax.legend()
+    ax.tick_params(axis='x', rotation=45)
+    ax.grid(True)
     plt.tight_layout()
+
+    # Save plot as an image
+    plot_filename = f'{tmc}_{road}_{direction}_{intersection}_{state}.png'.replace('/', '_')
+    plt.savefig(os.path.join(output_dir, plot_filename))
+
+    # Display the plot in a new window
     plt.show()
 
 print("Plotting completed.")
