@@ -1,115 +1,160 @@
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import os
+import logging
+from datetime import datetime
 
-# Load the datasets
-print("Loading datasets...")
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+
+# Capture the current day and time
+current_day = datetime.now().strftime('%Y-%m-%d')
+current_time = datetime.now().strftime('%H:%M:%S')
+
+# Save the day and time to a CSV file
+time_data = {'Day': [current_day], 'Time': [current_time]}
+time_df = pd.DataFrame(time_data)
+time_csv_path = 'Time.csv'
+time_df.to_csv(time_csv_path, index=False)
+logging.info(f"Day and time saved to {time_csv_path}")
+
+# Define paths for the datasets
 probe_data_path = 'probe_data/Probe-Data-Export.csv'
 tmc_data_path = 'probe_data/TMC_Identification.csv'
 
+# Load the datasets
+logging.info("Loading datasets...")
 probe_data = pd.read_csv(probe_data_path, parse_dates=['measurement_tstamp'])
 tmc_data = pd.read_csv(tmc_data_path)
-
-print("Datasets loaded successfully.")
+logging.info("Datasets loaded successfully.")
 
 # Remove duplicate columns in the probe data
-print("Cleaning probe data by removing duplicate columns...")
+logging.info("Cleaning probe data by removing duplicate columns...")
 columns_to_drop = ['historical_average_speed.1', 'travel_time_minutes.1']
 probe_data_cleaned = probe_data.loc[:, ~probe_data.columns.duplicated()].drop(columns=columns_to_drop)
 
 # Rename the column to match for merging
-print("Renaming columns for merging...")
+logging.info("Renaming columns for merging...")
 probe_data_cleaned.rename(columns={'tmc_code': 'tmc'}, inplace=True)
 
 # Merge probe data with TMC identification data on TMC
-print("Merging probe data with TMC identification data...")
+logging.info("Merging probe data with TMC identification data...")
 data_merged = pd.merge(probe_data_cleaned, tmc_data, on='tmc', how='left')
+logging.info("Data merged successfully.")
 
-print("Data merged successfully.")
-print("Merged DataFrame columns:", data_merged.columns)
+# Initialize anomaly columns
+data_merged['is_anomaly'] = False
+data_merged['is_long_window_anomaly'] = False
+data_merged['binary_anomaly'] = 0
 
-# Set parameters for anomaly detection
+# Define parameters for anomaly detection
 deviation_threshold = -10  # Threshold for speed deviation (negative for significant decrease)
-sustained_period = 5  # Number of consecutive minutes for an anomaly
+sustained_period = 5  # Number of consecutive minutes for a short window anomaly
+long_window_period = 10  # Number of consecutive minutes for a long window anomaly
+long_deviation_threshold = -15  # Threshold for significant speed drop in long window
+minimum_duration = 5  # Minimum duration in minutes to include the anomaly
 
-# Function to detect anomalies for each TMC segment
+# Function to detect and record anomalies
 def detect_anomalies(data_segment):
-    print(f"Detecting anomalies for TMC segment {data_segment['tmc'].iloc[0]}...")
-    data_segment['date'] = data_segment['measurement_tstamp'].dt.date
     anomalies = []
-
-    for date, group in data_segment.groupby('date'):
-        group['speed_deviation'] = group['speed'] - group['historical_average_speed']
-        group['is_anomaly'] = (group['speed_deviation'] < deviation_threshold).rolling(window=sustained_period).sum() >= sustained_period
-        anomalies.extend(group[group['is_anomaly']].to_dict(orient='records'))
+    data_segment['speed_deviation'] = data_segment['speed'] - data_segment['historical_average_speed']
+    data_segment['is_anomaly'] = (data_segment['speed_deviation'] < deviation_threshold).rolling(window=sustained_period).sum() >= sustained_period
+    data_segment['is_long_window_anomaly'] = (data_segment['speed_deviation'] < long_deviation_threshold).rolling(window=long_window_period).sum() >= long_window_period
     
-    print(f"Anomalies detected for TMC segment {data_segment['tmc'].iloc[0]}.")
-    return pd.DataFrame(anomalies)
+    current_event = None
+    for index, row in data_segment.iterrows():
+        if row['is_anomaly'] or row['is_long_window_anomaly']:
+            if current_event is None:
+                current_event = {
+                    'start_time': row['measurement_tstamp'],
+                    'end_time': row['measurement_tstamp'],
+                    'tmc': row['tmc'],
+                    'road': row['road'],
+                    'intersection': row['intersection'],
+                    'type': 'long_window' if row['is_long_window_anomaly'] else 'short_window'
+                }
+            else:
+                current_event['end_time'] = row['measurement_tstamp']
+            # Mark this specific minute as an anomaly in binary_anomaly
+            data_segment.loc[index, 'binary_anomaly'] = 1
+        else:
+            if current_event is not None:
+                duration = int((current_event['end_time'] - current_event['start_time']).total_seconds() / 60) + 1  # Add 1 minute to include both start and end
+                if duration >= minimum_duration:
+                    current_event['duration_minutes'] = duration
+                    anomalies.append(current_event)
+                current_event = None
+    
+    # If an anomaly was ongoing at the end of the data segment
+    if current_event is not None:
+        duration = int((current_event['end_time'] - current_event['start_time']).total_seconds() / 60) + 1
+        if duration >= minimum_duration:
+            current_event['duration_minutes'] = duration
+            anomalies.append(current_event)
+    
+    return anomalies
 
-# Analyze each TMC segment
-print("Analyzing each TMC segment...")
-all_anomalies = pd.DataFrame()
+# Detect anomalies for all TMC segments and save detailed summary
+detailed_summary = []
 
+logging.info("Detecting anomalies for all TMC segments...")
 for tmc in data_merged['tmc'].unique():
-    print(f"Processing TMC segment {tmc}...")
-    segment_data = data_merged[data_merged['tmc'] == tmc]
-    anomalies_df = detect_anomalies(segment_data)
-    all_anomalies = pd.concat([all_anomalies, anomalies_df], ignore_index=True)
+    segment_data = data_merged[data_merged['tmc'] == tmc].copy()
+    anomalies = detect_anomalies(segment_data)
+    
+    # Update flags in the main data for specific minutes
+    data_merged.update(segment_data)
+    
+    # If no anomalies, add a placeholder entry
+    if not anomalies:
+        detailed_summary.append({
+            'tmc': tmc,
+            'road': segment_data['road'].iloc[0] if 'road' in segment_data.columns else '',
+            'intersection': segment_data['intersection'].iloc[0] if 'intersection' in segment_data.columns else '',
+            'start_time': '',
+            'end_time': '',
+            'type': '',
+            'duration_minutes': ''
+        })
+    else:
+        detailed_summary.extend(anomalies)
 
-print("Anomaly detection completed.")
+# Convert the detailed summary to a DataFrame and save it
+detailed_summary_df = pd.DataFrame(detailed_summary)
 
-# Create directory for saving plots
-output_dir = 'pictures'
-os.makedirs(output_dir, exist_ok=True)
+# Ensure that 'start_time' and 'end_time' columns are included in the DataFrame
+if 'start_time' not in detailed_summary_df.columns:
+    detailed_summary_df['start_time'] = ''
+if 'end_time' not in detailed_summary_df.columns:
+    detailed_summary_df['end_time'] = ''
 
-# Plot the speed vs historical average speed and reference speed for each TMC segment
-print("Plotting data for TMC segments...")
+# Convert 'duration_minutes' to numeric, replacing non-numeric entries with 0
+detailed_summary_df['duration_minutes'] = pd.to_numeric(detailed_summary_df['duration_minutes'], errors='coerce').fillna(0)
 
+detailed_summary_df.to_csv('detailed_summary_of_anomalies.csv', index=False)
+logging.info("Detailed summary of anomalies saved to detailed_summary_of_anomalies.csv")
+
+# Save the combined data to a single CSV file
+combined_csv_path = 'combined_data.csv'
+data_merged.to_csv(combined_csv_path, index=False)
+logging.info(f"Combined data saved to {combined_csv_path}")
+
+# Summarize anomalies for each TMC and save summary to CSV
+summary = []
 for tmc in data_merged['tmc'].unique():
-    print(f"Plotting data for TMC segment {tmc}...")
     segment_data = data_merged[data_merged['tmc'] == tmc]
+    has_anomalies = segment_data['binary_anomaly'].any()
+    
+    # Recalculate the total duration of anomalies for this TMC based on detailed events
+    total_duration = detailed_summary_df[detailed_summary_df['tmc'] == tmc]['duration_minutes'].sum()
+    
+    summary.append({
+        'tmc': tmc,
+        'road': segment_data['road'].iloc[0] if 'road' in segment_data.columns else '',
+        'intersection': segment_data['intersection'].iloc[0] if 'intersection' in segment_data.columns else '',
+        'has_anomalies': has_anomalies,
+        'total_anomaly_duration_minutes': total_duration if total_duration > 0 else 0  # Ensure duration is set properly
+    })
 
-    road = segment_data['road'].iloc[0]
-    direction = segment_data['direction'].iloc[0]
-    intersection = segment_data['intersection'].iloc[0]
-    state = segment_data['state'].iloc[0]
-
-    fig, ax = plt.subplots(figsize=(14, 7))
-    ax.plot(segment_data['measurement_tstamp'], segment_data['speed'], label='Current Speed', color='blue')
-    ax.plot(segment_data['measurement_tstamp'], segment_data['historical_average_speed'], label='Historical Average Speed', color='green')
-    ax.plot(segment_data['measurement_tstamp'], segment_data['reference_speed'], label='Reference Speed', color='red')
-
-    # Plot anomalies
-    anomalies = all_anomalies[all_anomalies['tmc'] == tmc]
-    ax.scatter(anomalies['measurement_tstamp'], anomalies['speed'], color='orange', label='Anomalies', zorder=5)
-
-    ax.set_xlabel('Time')
-    ax.set_ylabel('Speed (mph)')
-    ax.set_title(f'{road} {direction} at {intersection}, {state}')
-    ax.legend()
-    ax.tick_params(axis='x', rotation=45)
-    ax.grid(True)
-    plt.tight_layout()
-
-    # Save plot as an image
-    plot_filename = f'{tmc}_{road}_{direction}_{intersection}_{state}.png'.replace('/', '_')
-    plt.savefig(os.path.join(output_dir, plot_filename))
-
-    # Display the plot in a new window
-    plt.show()
-
-print("Plotting completed.")
-
-# Output anomaly time ranges to a .txt file
-print("Writing anomaly times to a text file...")
-with open('anomaly_times.txt', 'w') as f:
-    f.write('Anomalies detected at the following times:\n')
-    for index, row in all_anomalies.iterrows():
-        f.write(f"{row['measurement_tstamp']} (TMC: {row['tmc']})\n")
-
-print("Anomaly times written to anomaly_times.txt.")
-
-# Show the first few rows of the anomalies
-print("First few rows of detected anomalies:")
-print(all_anomalies.head())
+summary_df = pd.DataFrame(summary)
+summary_df.to_csv('summary_of_anomalies.csv', index=False)
+logging.info("Summary of anomalies saved to summary_of_anomalies.csv")
