@@ -6,6 +6,7 @@ from email import encoders
 import os
 import pandas as pd
 from datetime import datetime
+from CONFIGS import EMAIL_LIST
 
 def send_email(subject, body, to_emails, attachment_path=None):
     smtp_server = 'smtp.gmail.com'
@@ -39,7 +40,7 @@ def send_email(subject, body, to_emails, attachment_path=None):
 
 def check_and_send_anomalies():
     summary_path = 'summary_of_anomalies.csv'
-    to_emails = ['sarahpalmer127@gmail.com']
+    to_emails = EMAIL_LIST
 
     # Check if the summary file exists
     if not os.path.exists(summary_path):
